@@ -92,7 +92,7 @@ import random
 
 def normal_answer(instructions, user_text):
 # 20%で関連する過去の名言を返す
-if random.random() < 0.20:
+if random.random() < 1.00:
     quotes = list_quotes()
 
     if quotes:
