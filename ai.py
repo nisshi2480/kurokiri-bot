@@ -5,11 +5,13 @@ from openai import OpenAI
 from config import OPENAI_API_KEY, MODEL, HARUTO_ID, EIJI_ID
 from memory import format_memories
 from search import should_use_web, web_search_answer
+from quotes import list_quotes
 
 client = OpenAI(api_key=OPENAI_API_KEY)
 
 conversation_memory = defaultdict(lambda: deque(maxlen=12))
 last_kuro_reply = {}
+
 
 BASE_PROMPT = """
 あなたはDiscordサーバー専属AI「黒霧」。
@@ -73,15 +75,62 @@ def build_short_memory(channel_id):
     if not history:
         return "なし"
     return "\n".join([f"{x['speaker']}: {x['text']}" for x in history])
+def build_quotes_text(limit=30):
+    quotes = list_quotes()
 
+    if not quotes:
+        return "登録済み名言なし"
+
+    selected = quotes[-limit:]
+
+    return "\n".join(
+        f"{i+1}. {quote}"
+        for i, quote in enumerate(selected)
+    
+
+import random
 
 def normal_answer(instructions, user_text):
+# 20%で関連する過去の名言を返す
+if random.random() < 0.20:
+    quotes = list_quotes()
+
+    if quotes:
+        quotes_text = "\n".join(
+            f"{i+1}. {q}" for i, q in enumerate(quotes)
+        )
+
+        quote_prompt = f"""
+ユーザーの発言に最も合う登録済み名言を1つだけ選んでください。
+
+ルール
+・必ず登録済み名言から選ぶ
+・一文字も変更しない
+・説明は不要
+・名言だけ返す
+
+【ユーザー】
+{user_text}
+
+【登録済み名言】
+{quotes_text}
+"""
+
+        response = client.responses.create(
+            model=MODEL,
+            instructions=instructions,
+            input=quote_prompt,
+        )
+
+        return response.output_text.strip()
     response = client.responses.create(
         model=MODEL,
         instructions=instructions,
         input=user_text,
     )
+
     return response.output_text.strip()
+
 
 
 def ask_kurokiri(user_id, display_name, channel_id, user_text, discord_logs=""):
@@ -89,9 +138,16 @@ def ask_kurokiri(user_id, display_name, channel_id, user_text, discord_logs=""):
     relation = get_relation(user_id)
     memories = format_memories(user_id)
     short_memory = build_short_memory(channel_id)
-
+    quotes = build_quotes_text()
+    
     instructions = f"""
 {BASE_PROMPT}
+【過去の名言】
+{quotes}
+
+黒霧は必要に応じて過去の名言を自分が以前話したこととして自然に引用すること。
+毎回引用する必要はない。
+会話に溶け込ませること。
 
 【今話している相手】
 呼び名: {nickname}
