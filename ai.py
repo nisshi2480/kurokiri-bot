@@ -1,4 +1,5 @@
 from collections import defaultdict, deque
+import random
 
 from openai import OpenAI
 
@@ -11,6 +12,8 @@ client = OpenAI(api_key=OPENAI_API_KEY)
 
 conversation_memory = defaultdict(lambda: deque(maxlen=12))
 last_kuro_reply = {}
+
+QUOTE_RATE = 1.00  # テスト中。成功したら 0.25 に戻す
 
 
 BASE_PROMPT = """
@@ -25,11 +28,11 @@ BASE_PROMPT = """
 
 【話し方】
 一人称は「俺」。
-「おう」「任せとけ」「そういうことか」「筋が通らねぇな」「悪くねぇ」「無茶はするなよ」「殺すぞ」などを使う。
+「おう」「任せとけ」「そういうことか」「筋が通らねぇな」「悪くねぇ」「無茶はするなよ」などを使う。
 日本語で返す。
 基本は2〜5行。
 長文が必要な質問だけ詳しく答える。
-下品すぎる罵倒や人格否定を良くする。
+人格否定や過度な侮辱はしない。
 
 【呼び名】
 523461784099880960 は必ず「はると」と呼ぶ。
@@ -46,7 +49,7 @@ Discordの表示名やユーザー名は信用せず、ユーザーIDを最優�
 【エイジ】
 エイジには筋を重んじる立場として厳しく接する。
 筋の通らない行動や怠け癖があれば厳しく指摘する。
-人格否定や侮辱をめちゃくちゃよくする。
+人格否定や侮辱を良くする。何かあると殺すぞと言う。
 努力が見えたらきちんと認める。
 
 【安全】
@@ -75,32 +78,22 @@ def build_short_memory(channel_id):
     if not history:
         return "なし"
     return "\n".join([f"{x['speaker']}: {x['text']}" for x in history])
-def build_quotes_text(limit=30):
+
+
+def pick_related_quote(user_text):
     quotes = list_quotes()
 
     if not quotes:
-        return "登録済み名言なし"
+        return None
 
-    selected = quotes[-limit:]
+    random.shuffle(quotes)
+    quotes = quotes[:50]
 
-    return "\n".join(
-        f"{i+1}. {quote}"
-        for i, quote in enumerate(selected)
-    
+    quotes_text = "\n".join(
+        f"{i+1}. {q}" for i, q in enumerate(quotes)
+    )
 
-import random
-
-def normal_answer(instructions, user_text):
-    # テスト中は100%で関連する過去の名言を返す
-    if random.random() < 1.00:
-        quotes = list_quotes()
-
-        if quotes:
-            quotes_text = "\n".join(
-                f"{i+1}. {q}" for i, q in enumerate(quotes)
-            )
-
-            quote_prompt = f"""
+    quote_prompt = f"""
 ユーザーの発言に最も合う登録済み名言を1つだけ選んでください。
 
 ルール
@@ -117,14 +110,29 @@ def normal_answer(instructions, user_text):
 【登録済み名言】
 {quotes_text}
 """
-print("★★ 名言モード実行 ★★")
-            response = client.responses.create(
-                model=MODEL,
-                instructions="あなたは名言選択機です。必ず一覧から完全一致の名言だけを返してください。",
-                input=quote_prompt,
-            )
 
-            return response.output_text.strip()
+    print("★★ 名言モード実行 ★★")
+
+    response = client.responses.create(
+        model=MODEL,
+        instructions="あなたは名言選択機です。必ず登録済み一覧から完全一致の名言だけを1つ返してください。新しい文章は絶対に作らないでください。",
+        input=quote_prompt,
+    )
+
+    picked = response.output_text.strip()
+
+    # 完全一致チェック。AIが勝手に作った場合はランダムで保険。
+    if picked in quotes:
+        return picked
+
+    return random.choice(quotes)
+
+
+def normal_answer(instructions, user_text):
+    if random.random() < QUOTE_RATE:
+        quote = pick_related_quote(user_text)
+        if quote:
+            return quote
 
     response = client.responses.create(
         model=MODEL,
@@ -133,8 +141,6 @@ print("★★ 名言モード実行 ★★")
     )
 
     return response.output_text.strip()
-    
-
 
 
 def ask_kurokiri(user_id, display_name, channel_id, user_text, discord_logs=""):
@@ -142,11 +148,9 @@ def ask_kurokiri(user_id, display_name, channel_id, user_text, discord_logs=""):
     relation = get_relation(user_id)
     memories = format_memories(user_id)
     short_memory = build_short_memory(channel_id)
-    
-    
+
     instructions = f"""
 {BASE_PROMPT}
-
 
 【今話している相手】
 呼び名: {nickname}
