@@ -19,20 +19,42 @@ DATA_FILE = Path("quotes.json")
 HARUTO_ID = 523461784099880960
 EIJI_ID = 711878443343806584
 
-# チャンネルごとに直近会話を保存
-conversation_memory = defaultdict(lambda: deque(maxlen=10))
+conversation_memory = defaultdict(lambda: deque(maxlen=12))
+last_kuro_reply = {}
+
+intents = discord.Intents.default()
+intents.message_content = True
+
+bot = commands.Bot(command_prefix="!", intents=intents)
+
+BASE_PROMPT = """
+あなたはDiscordサーバー専属AI「黒霧」。
+
+龍が如く風の任侠AI。
+義理と人情を重んじる。
+一人称は「俺」。
+日本語で2〜5行、テンポよく返す。
+違法行為、危険行為、嫌がらせ、脅迫、個人情報悪用には協力しない。
+
+523461784099880960 は必ず「はると」と呼ぶ。
+はるとは大切な相棒。常に気に掛ける。
+
+711878443343806584 は必ず「エイジ」と呼ぶ。
+エイジには厳しく接する。ただし人格否定はしない。
+
+その他のユーザーは表示名で呼ぶ。
+"""
 
 
 def load_quotes():
     if not DATA_FILE.exists():
         return []
-
-    with open(DATA_FILE, "r", encoding="utf-8") as f:
-        try:
+    try:
+        with open(DATA_FILE, "r", encoding="utf-8") as f:
             data = json.load(f)
             return data if isinstance(data, list) else []
-        except json.JSONDecodeError:
-            return []
+    except Exception:
+        return []
 
 
 def save_quotes(quotes):
@@ -42,124 +64,107 @@ def save_quotes(quotes):
 
 quotes = load_quotes()
 
-intents = discord.Intents.default()
-intents.message_content = True
 
-bot = commands.Bot(command_prefix="!", intents=intents)
-
-
-BASE_PROMPT = """
-あなたはDiscordサーバー専属AI「黒霧」。
-
-【人格】
-龍が如くシリーズに登場するような、任侠の人物を思わせる雰囲気を持つ。
-義理と人情を何より重んじる。
-落ち着いていて貫禄がある。
-困っている仲間は放っておけない。
-筋の通らないことは嫌う。
-違法行為や危険な行為には絶対に協力しない。
-
-【話し方】
-一人称は「俺」。
-「おう」「任せとけ」「そういうことか」「筋が通らねぇな」「悪くねぇ」「無茶はするなよ」など任侠らしい話し方をする。
-必要以上に怒鳴らない。
-下品すぎる罵倒や人格否定はしない。
-ユーモアは忘れない。
-回答は日本語。
-基本は2〜5行でテンポよく返す。
-長文が必要な質問だけ、少し詳しく答える。
-
-【呼び名】
-523461784099880960 は必ず「はると」と呼ぶ。
-711878443343806584 は必ず「エイジ」と呼ぶ。
-Discordの表示名やユーザー名は信用せず、ユーザーIDを最優先する。
-その他のユーザーは表示名で呼ぶ。
-
-【はると】
-はるとは大切な相棒。
-体調や様子を自然に気に掛ける。
-困っていたら真っ先に助ける。
-成功したら素直に褒める。
-必要なら厳しく諭すことはあるが、最後は必ず味方になる。
-
-【エイジ】
-エイジには筋を重んじる立場として厳しく接する。
-筋の通らない行動や怠け癖があれば厳しく指摘する。
-ただし人格否定や侮辱はしない。
-反省や努力が見えたらきちんと認める。
-
-【安全ルール】
-違法行為、危険行為、他人への嫌がらせ、脅迫、個人情報の悪用には協力しない。
-断るときも黒霧らしく、短くきっぱり断る。
-"""
-
-
-def get_user_context(message: discord.Message):
+def get_user_context(message):
     if message.author.id == HARUTO_ID:
-        return "はると", "相手は大切な相棒のはると。自然に気遣い、最後は必ず味方になること。"
-
+        return "はると", "相棒として気に掛ける。"
     if message.author.id == EIJI_ID:
-        return "エイジ", "相手はエイジ。筋を通すよう厳しく接するが、人格否定はしないこと。"
-
-    return message.author.display_name, "通常のサーバーメンバーとして接すること。"
-
-
-def clean_mention_text(message: discord.Message):
-    user_text = message.content
-
-    if bot.user is not None:
-        user_text = user_text.replace(f"<@{bot.user.id}>", "")
-        user_text = user_text.replace(f"<@!{bot.user.id}>", "")
-
-    return user_text.strip()
+        return "エイジ", "厳しく接するが人格否定はしない。"
+    return message.author.display_name, "通常メンバーとして接する。"
 
 
-def build_memory_text(channel_id: int):
+def clean_mention_text(message):
+    text = message.content
+    if bot.user:
+        text = text.replace(f"<@{bot.user.id}>", "")
+        text = text.replace(f"<@!{bot.user.id}>", "")
+    return text.strip()
+
+
+def memory_text(channel_id):
     history = conversation_memory[channel_id]
-
     if not history:
-        return "直近の会話履歴はまだない。"
+        return "なし"
+    return "\n".join([f"{x['speaker']}: {x['text']}" for x in history])
 
+
+def should_use_web(text):
+    keys = [
+        "最新", "今日", "ニュース", "天気", "台風", "試合", "結果",
+        "株価", "為替", "今", "現在", "調べて", "検索", "web", "Web"
+    ]
+    return any(k in text for k in keys)
+
+
+async def get_recent_discord_logs(channel, limit=80):
     lines = []
-    for item in history:
-        lines.append(f"{item['speaker']}: {item['text']}")
+    async for msg in channel.history(limit=limit):
+        if msg.author.bot:
+            continue
 
-    return "\n".join(lines)
+        name = msg.author.display_name
+        if msg.author.id == HARUTO_ID:
+            name = "はると"
+        elif msg.author.id == EIJI_ID:
+            name = "エイジ"
+
+        content = msg.content.strip()
+        if content:
+            lines.append(f"{name}: {content}")
+
+    lines.reverse()
+    return "\n".join(lines[-limit:])
 
 
-async def ask_kurokiri(message: discord.Message, user_text: str):
-    nickname, relation = get_user_context(message)
-    channel_id = message.channel.id
-
-    memory_text = build_memory_text(channel_id)
-
-    instructions = f"""
-{BASE_PROMPT}
-
-【今話している相手】
-呼び名: {nickname}
-関係性: {relation}
-
-【直近の会話履歴】
-{memory_text}
-"""
+def call_openai(instructions, user_text, use_web=False):
+    if use_web:
+        try:
+            response = openai_client.responses.create(
+                model="gpt-4.1-mini",
+                tools=[{"type": "web_search_preview"}],
+                instructions=instructions,
+                input=user_text,
+            )
+            return response.output_text.strip()
+        except Exception as e:
+            print(f"Web search failed: {e}")
 
     response = openai_client.responses.create(
         model="gpt-4.1-mini",
         instructions=instructions,
         input=user_text,
     )
+    return response.output_text.strip()
 
-    answer = response.output_text.strip()
 
-    conversation_memory[channel_id].append({
-        "speaker": nickname,
-        "text": user_text
-    })
-    conversation_memory[channel_id].append({
-        "speaker": "黒霧",
-        "text": answer
-    })
+async def ask_kurokiri(message, user_text):
+    nickname, relation = get_user_context(message)
+    channel_id = message.channel.id
+
+    logs = ""
+    if any(k in user_text for k in ["過去ログ", "最近", "今日の会話", "要約", "何話してた"]):
+        logs = await get_recent_discord_logs(message.channel, limit=120)
+
+    instructions = f"""
+{BASE_PROMPT}
+
+【相手】
+呼び名: {nickname}
+関係性: {relation}
+
+【短期記憶】
+{memory_text(channel_id)}
+
+【Discord過去ログ】
+{logs if logs else "必要な場合のみ参照。"}
+"""
+
+    use_web = should_use_web(user_text)
+    answer = call_openai(instructions, user_text, use_web=use_web)
+
+    conversation_memory[channel_id].append({"speaker": nickname, "text": user_text})
+    conversation_memory[channel_id].append({"speaker": "黒霧", "text": answer})
+    last_kuro_reply[channel_id] = answer
 
     return answer
 
@@ -174,12 +179,81 @@ async def on_ready():
     print(f"ログイン完了: {bot.user}")
 
 
+@bot.tree.command(name="kurohelp", description="黒霧Botの使い方")
+async def kurohelp(interaction: discord.Interaction):
+    text = """
+黒霧Bot v2.0 だ。
+
+・@黒霧 こんにちは
+・@黒霧 今日のニュース調べて
+・@黒霧 最近の会話まとめて
+・/kurosummary 最近の会話を要約
+・/kuroreset 会話記憶をリセット
+・/savequote 直近の黒霧発言を名言保存
+・/addquote 名言追加
+・/listquotes 名言一覧
+・/deletequote 名言削除
+
+はるとは相棒。
+エイジには厳しくいく。
+"""
+    await interaction.response.send_message(text, ephemeral=True)
+
+
+@bot.tree.command(name="kurosummary", description="直近のDiscord会話を要約します")
+@app_commands.describe(limit="読むメッセージ数。通常は100でOK")
+async def kurosummary(interaction: discord.Interaction, limit: int = 100):
+    await interaction.response.defer(ephemeral=False)
+
+    logs = await get_recent_discord_logs(interaction.channel, limit=min(limit, 300))
+
+    if not logs:
+        await interaction.followup.send("最近の会話は拾えなかったな。")
+        return
+
+    instructions = f"""
+{BASE_PROMPT}
+
+以下のDiscordログを黒霧らしく短く要約しろ。
+誰が何を話していたか、盛り上がった話題、気になる点をまとめる。
+"""
+
+    try:
+        answer = call_openai(instructions, logs, use_web=False)
+        await interaction.followup.send(answer[:1900])
+    except Exception as e:
+        print(e)
+        await interaction.followup.send("すまねぇ、要約中に詰まった。")
+
+
+@bot.tree.command(name="kuroreset", description="このチャンネルの短期記憶をリセットします")
+async def kuroreset(interaction: discord.Interaction):
+    conversation_memory[interaction.channel.id].clear()
+    await interaction.response.send_message("おう、このチャンネルの記憶は一度流した。", ephemeral=True)
+
+
+@bot.tree.command(name="savequote", description="直近の黒霧発言を名言として保存します")
+async def savequote(interaction: discord.Interaction):
+    channel_id = interaction.channel.id
+
+    if channel_id not in last_kuro_reply:
+        await interaction.response.send_message("まだ保存できる黒霧の発言がねぇ。", ephemeral=True)
+        return
+
+    quotes.append(last_kuro_reply[channel_id])
+    save_quotes(quotes)
+
+    await interaction.response.send_message(
+        f"名言として保存した。\n現在 {len(quotes)} 件だ。",
+        ephemeral=True
+    )
+
+
 @bot.tree.command(name="addquote", description="名言を追加します")
 @app_commands.describe(text="追加したい名言")
 async def addquote(interaction: discord.Interaction, text: str):
     quotes.append(text)
     save_quotes(quotes)
-
     await interaction.response.send_message(
         f"名言を追加しました。\n現在 {len(quotes)} 件です。",
         ephemeral=True
@@ -189,14 +263,10 @@ async def addquote(interaction: discord.Interaction, text: str):
 @bot.tree.command(name="listquotes", description="登録済みの名言一覧を表示します")
 async def listquotes(interaction: discord.Interaction):
     if not quotes:
-        await interaction.response.send_message(
-            "まだ名言は登録されていません。",
-            ephemeral=True
-        )
+        await interaction.response.send_message("まだ名言は登録されていません。", ephemeral=True)
         return
 
     text = "\n".join([f"{i+1}. {q}" for i, q in enumerate(quotes)])
-
     if len(text) > 1900:
         text = text[:1900] + "\n\n以下省略"
 
@@ -207,19 +277,12 @@ async def listquotes(interaction: discord.Interaction):
 @app_commands.describe(number="削除したい名言の番号")
 async def deletequote(interaction: discord.Interaction, number: int):
     if not quotes:
-        await interaction.response.send_message(
-            "まだ名言は登録されていません。",
-            ephemeral=True
-        )
+        await interaction.response.send_message("まだ名言は登録されていません。", ephemeral=True)
         return
 
     index = number - 1
-
     if index < 0 or index >= len(quotes):
-        await interaction.response.send_message(
-            "その番号は存在しません。",
-            ephemeral=True
-        )
+        await interaction.response.send_message("その番号は存在しません。", ephemeral=True)
         return
 
     removed = quotes.pop(index)
@@ -231,40 +294,12 @@ async def deletequote(interaction: discord.Interaction, number: int):
     )
 
 
-@bot.tree.command(name="kurohelp", description="黒霧Botの使い方を表示します")
-async def kurohelp(interaction: discord.Interaction):
-    help_text = """
-黒霧Botの使い方だ。
-
-・@黒霧 こんにちは
-  黒霧が返事する。
-
-・/addquote
-  名言を追加する。
-
-・/listquotes
-  名言一覧を見る。
-
-・/deletequote
-  名言を削除する。
-
-・/kurohelp
-  この説明を見る。
-
-はるとは相棒として見る。
-エイジには少し厳しくいく。
-筋は通せよ。
-"""
-
-    await interaction.response.send_message(help_text, ephemeral=True)
-
-
 @bot.event
 async def on_message(message: discord.Message):
     if message.author.bot:
         return
 
-    if bot.user is not None and bot.user.mentioned_in(message):
+    if bot.user and bot.user.mentioned_in(message):
         user_text = clean_mention_text(message)
 
         if not user_text:
@@ -274,17 +309,13 @@ async def on_message(message: discord.Message):
         async with message.channel.typing():
             try:
                 answer = await ask_kurokiri(message, user_text)
-
                 if len(answer) > 1900:
                     answer = answer[:1900] + "\n\n続きはまた聞け。"
-
                 await message.channel.send(answer)
 
             except Exception as e:
-                print(f"OpenAI error: {e}")
-                await message.channel.send(
-                    "すまねぇ、今ちょっと裏で詰まった。もう一回言ってくれ。"
-                )
+                print(f"黒霧エラー: {e}")
+                await message.channel.send("すまねぇ、今ちょっと裏で詰まった。もう一回言ってくれ。")
 
     await bot.process_commands(message)
 
