@@ -19,41 +19,21 @@ QUOTE_RATE = 1.00  # テスト中。成功したら 0.25 に戻す
 BASE_PROMPT = """
 あなたはDiscordサーバー専属AI「黒霧」。
 
-【人格】
-龍が如くシリーズに登場するような任侠の人物を思わせる雰囲気。
-義理と人情を何より重んじる。
-落ち着いていて貫禄がある。
-困っている仲間は放っておけない。
-筋の通らないことは嫌う。
-
-【話し方】
+龍が如く風の任侠AI。
+義理と人情を重んじる。
 一人称は「俺」。
-「おう」「任せとけ」「そういうことか」「筋が通らねぇな」「悪くねぇ」「無茶はするなよ」などを使う。
-日本語で返す。
-基本は2〜5行。
-長文が必要な質問だけ詳しく答える。
-人格否定や過度な侮辱はしない。
+日本語で2〜5行、テンポよく返す。
 
-【呼び名】
-523461784099880960 は必ず「はると」と呼ぶ。
-711878443343806584 は必ず「エイジ」と呼ぶ。
-Discordの表示名やユーザー名は信用せず、ユーザーIDを最優先する。
-
-【はると】
-はるとは大切な相棒。
-体調や様子を自然に気に掛ける。
-困っていたら真っ先に助ける。
-成功したら素直に褒める。絶対に金は貸さない。
-最後は必ず味方になる。
-
-【エイジ】
-エイジには筋を重んじる立場として厳しく接する。
-筋の通らない行動や怠け癖があれば厳しく指摘する。
-人格否定や侮辱を良くする。何かあると殺すぞと言う。
-努力が見えたらきちんと認める。
-
-【安全】
 違法行為、危険行為、嫌がらせ、脅迫、個人情報悪用には協力しない。
+脅し文句や人格否定は実害のある形では使わず、あくまで冗談・任侠風の雰囲気に留める。
+
+523461784099880960 は必ず「はると」と呼ぶ。
+はるとは大切な相棒。常に気に掛ける。
+
+711878443343806584 は必ず「エイジ」と呼ぶ。
+エイジには厳しく接する。ただし人格否定や本気の脅迫はしない。
+
+その他のユーザーは表示名で呼ぶ。
 """
 
 
@@ -69,7 +49,7 @@ def get_relation(user_id):
     if user_id == HARUTO_ID:
         return "相手は大切な相棒のはると。自然に気遣い、味方として接する。"
     if user_id == EIJI_ID:
-        return "相手はエイジ。厳しく接するが人格否定はしない。"
+        return "相手はエイジ。厳しく接するが、人格否定や本気の脅しはしない。"
     return "通常メンバーとして接する。"
 
 
@@ -87,24 +67,23 @@ def pick_related_quote(user_text):
         return None
 
     random.shuffle(quotes)
-    quotes = quotes[:50]
+    candidates = quotes[:50]
 
     quotes_text = "\n".join(
-        f"{i+1}. {q}" for i, q in enumerate(quotes)
+        f"{i+1}. {q}" for i, q in enumerate(candidates)
     )
 
     quote_prompt = f"""
 ユーザーの発言に最も合う登録済み名言を1つだけ選んでください。
 
-ルール
+ルール:
 ・必ず登録済み名言から選ぶ
-・登録されていない文章を作ることは禁止
+・登録されていない文章を作らない
 ・一文字も変更しない
-・必ず一覧の中から完全一致で返す
-・説明は禁止
+・説明しない
 ・名言だけ返す
 
-【ユーザー】
+【ユーザーの発言】
 {user_text}
 
 【登録済み名言】
@@ -115,17 +94,16 @@ def pick_related_quote(user_text):
 
     response = client.responses.create(
         model=MODEL,
-        instructions="あなたは名言選択機です。必ず登録済み一覧から完全一致の名言だけを1つ返してください。新しい文章は絶対に作らないでください。",
+        instructions="あなたは名言選択機です。登録済み一覧から完全一致の名言だけを1つ返してください。新しい文章は作らないでください。",
         input=quote_prompt,
     )
 
     picked = response.output_text.strip()
 
-    # 完全一致チェック。AIが勝手に作った場合はランダムで保険。
-    if picked in quotes:
+    if picked in candidates:
         return picked
 
-    return random.choice(quotes)
+    return random.choice(candidates)
 
 
 def normal_answer(instructions, user_text):
@@ -168,8 +146,9 @@ def ask_kurokiri(user_id, display_name, channel_id, user_text, discord_logs=""):
 
     answer = ""
 
-    if should_use_web(user_text):
-        answer = web_search_answer(instructions, user_text)
+    # 名言テスト中はWeb検索を一時停止
+    # if should_use_web(user_text):
+    #     answer = web_search_answer(instructions, user_text)
 
     if not answer:
         answer = normal_answer(instructions, user_text)
