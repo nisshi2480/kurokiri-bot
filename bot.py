@@ -6,9 +6,13 @@ from pathlib import Path
 import discord
 from discord.ext import commands
 from discord import app_commands
+from openai import OpenAI
 
 # ここにDeveloper PortalでコピーしたBot Tokenを入れる
 TOKEN =  os.environ["TOKEN"]
+OPENAI_API_KEY = os.environ["OPENAI_API_KEY"]
+
+client = OpenAI(api_key=OPENAI_API_KEY)
 # 名言を保存するファイル
 DATA_FILE = Path("quotes.json")
 
