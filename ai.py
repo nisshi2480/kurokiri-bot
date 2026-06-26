@@ -91,22 +91,24 @@ def build_quotes_text(limit=30):
 import random
 
 def normal_answer(instructions, user_text):
-# 20%で関連する過去の名言を返す
-if random.random() < 1.00:
-    quotes = list_quotes()
+    # テスト中は100%で関連する過去の名言を返す
+    if random.random() < 1.00:
+        quotes = list_quotes()
 
-    if quotes:
-        quotes_text = "\n".join(
-            f"{i+1}. {q}" for i, q in enumerate(quotes)
-        )
+        if quotes:
+            quotes_text = "\n".join(
+                f"{i+1}. {q}" for i, q in enumerate(quotes)
+            )
 
-        quote_prompt = f"""
+            quote_prompt = f"""
 ユーザーの発言に最も合う登録済み名言を1つだけ選んでください。
 
 ルール
 ・必ず登録済み名言から選ぶ
+・登録されていない文章を作ることは禁止
 ・一文字も変更しない
-・説明は不要
+・必ず一覧の中から完全一致で返す
+・説明は禁止
 ・名言だけ返す
 
 【ユーザー】
@@ -115,14 +117,15 @@ if random.random() < 1.00:
 【登録済み名言】
 {quotes_text}
 """
+print("★★ 名言モード実行 ★★")
+            response = client.responses.create(
+                model=MODEL,
+                instructions="あなたは名言選択機です。必ず一覧から完全一致の名言だけを返してください。",
+                input=quote_prompt,
+            )
 
-        response = client.responses.create(
-            model=MODEL,
-            instructions=instructions,
-            input=quote_prompt,
-        )
+            return response.output_text.strip()
 
-        return response.output_text.strip()
     response = client.responses.create(
         model=MODEL,
         instructions=instructions,
@@ -130,6 +133,7 @@ if random.random() < 1.00:
     )
 
     return response.output_text.strip()
+    
 
 
 
@@ -138,16 +142,11 @@ def ask_kurokiri(user_id, display_name, channel_id, user_text, discord_logs=""):
     relation = get_relation(user_id)
     memories = format_memories(user_id)
     short_memory = build_short_memory(channel_id)
-    quotes = build_quotes_text()
+    
     
     instructions = f"""
 {BASE_PROMPT}
-【過去の名言】
-{quotes}
 
-黒霧は必要に応じて過去の名言を自分が以前話したこととして自然に引用すること。
-毎回引用する必要はない。
-会話に溶け込ませること。
 
 【今話している相手】
 呼び名: {nickname}
